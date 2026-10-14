@@ -1,0 +1,314 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>かせどり！上山まちめぐり - Pixel Game</title>
+<style>
+*{box-sizing:border-box}
+body{
+  margin:0;
+  background:#091422;
+  font-family:"Courier New", "Yu Gothic", sans-serif;
+  color:#fff;
+  user-select:none;
+  display:flex;
+  justify-content:center;
+  align-items:center;
+  min-height:100vh;
+}
+#wrap{
+  width:min(960px, 98vw);
+  background:#0b1d33;
+  border:6px solid #1c3b5e;
+  border-radius:12px;
+  box-shadow:0 0 20px rgba(0,0,0,0.8);
+  overflow:hidden;
+  position:relative;
+}
+#stage{position:relative; background:#000;}
+canvas{display:block; width:100%; height:auto; image-rendering:pixelated; image-rendering:crisp-edges;}
+
+#controls{
+  padding:12px 20px 16px;
+  background:#0a1728;
+  border-top:4px solid #1d3b5c;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+}
+.guide-box, .condition-box{
+  background:#0e243d;
+  border:3px solid #1d436a;
+  border-radius:8px;
+  padding:8px 14px;
+  font-size:13px;
+  color:#b0d3f8;
+  min-width:180px;
+}
+.guide-box div{margin-bottom:4px;}
+.guide-box span{color:#fff; font-weight:bold; background:#1c3d63; padding:2px 6px; border-radius:4px;}
+
+#step{
+  flex:1;
+  max-width:280px;
+  background:linear-gradient(to bottom, #186fcd, #0d4a8d);
+  border:4px solid #52aaff;
+  border-radius:10px;
+  color:#fff;
+  padding:12px 20px;
+  font:bold 22px "Courier New", sans-serif;
+  cursor:pointer;
+  box-shadow:0 6px #072a52, 0 0 10px rgba(35,131,200,0.5);
+  text-shadow:2px 2px #000;
+  transition:all 0.05s;
+}
+#step:active{transform:translateY(4px); box-shadow:0 2px #072a52;}
+
+.progress-bar-bg{width:100%; height:10px; background:#112133; border-radius:5px; overflow:hidden; margin-top:4px; border:1px solid #234c78;}
+.progress-bar-fill{height:100%; width:0%; background:linear-gradient(to right, #fcae1e, #ffe552);}
+
+#overlay{
+  position:absolute; inset:0;
+  background:rgba(5, 15, 27, 0.88);
+  display:flex; align-items:center; justify-content:center;
+  text-align:center; padding:20px; z-index:10;
+}
+.card{
+  max-width:550px; background:#0f243a; border:5px solid #5aa9fa;
+  border-radius:16px; box-shadow:0 0 30px #000; padding:24px;
+}
+.card h1{color:#ffd34e; font-size:30px; margin:0 0 12px; text-shadow:3px 3px #7a431f;}
+.card p{font-size:15px; line-height:1.7; color:#d2e7ff;}
+.start{
+  border:3px solid #fff; background:#e35d4f; color:#fff;
+  padding:12px 30px; font:bold 20px "Courier New"; cursor:pointer;
+  border-radius:8px; box-shadow:0 4px #852219; margin-top:10px;
+}
+.start:hover{background:#f46e60;}
+</style>
+</head>
+<body>
+
+<div id="wrap">
+  <div id="stage">
+    <canvas id="game" width="960" height="540"></canvas>
+    
+    <div id="overlay">
+      <div class="card">
+        <h1>かせどり！上山まちめぐり</h1>
+        <p>上山温泉の町民たちが次々と祝い水をかけるぞ！<br>
+        成功するほど<b>テンポが速くなり激しく</b>変化！<br>
+        <b>「カッ・カッ・カッ・カー！」</b>のリズムに合わせてステップしよう！</p>
+        <button class="start" id="start">▶ ゲームスタート</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="controls">
+    <div class="guide-box">
+      <div><span>SPACE</span> PC: SPACEキー</div>
+      <div><span>タップ</span> スマホ: ステップボタン</div>
+    </div>
+    
+    <button id="step">👣 ステップ！</button>
+
+    <div class="condition-box">
+      <div>クリア条件:</div>
+      <div style="color:#fff; font-weight:bold;">20回 正確にステップする</div>
+      <div style="text-align:right; margin-top:2px;" id="count-text">0 / 20</div>
+      <div class="progress-bar-bg"><div class="progress-bar-fill" id="progress"></div></div>
+    </div>
+  </div>
+</div>
+
+<script>
+const canvas = document.getElementById("game");
+const ctx = canvas.getContext("2d");
+ctx.imageSmoothingEnabled = false;
+
+const startBtn = document.getElementById("start");
+const stepBtn = document.getElementById("step");
+const overlay = document.getElementById("overlay");
+const countText = document.getElementById("count-text");
+const progressBar = document.getElementById("progress");
+
+let running = false;
+let startTime = 0;
+let lastBeat = -1;
+let score = 0, combo = 0, perfectCount = 0, lives = 4;
+let judgeText = "", judgeTimer = 0;
+let levelText = "LEVEL 1", levelBannerTimer = 0;
+let kasedoriJump = 0;
+let waterList = [], particles = [], bgConfetti = [];
+
+// 鳴き声吹き出し用
+let kasedoriVoice = "";
+let kasedoriVoiceTimer = 0;
+
+// 難易度制御パラメーター
+let beatInterval = 600;
+let currentLevel = 1;
+
+// 音声処理
+let audioCtx = null;
+function initAudio() {
+  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  if (audioCtx.state === "suspended") audioCtx.resume();
+}
+
+function playSound(type) {
+  if (!audioCtx) return;
+  const now = audioCtx.currentTime;
+
+  if (type === "ka") {
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = "sawtooth";
+    osc.frequency.setValueAtTime(600, now);
+    osc.frequency.exponentialRampToValueAtTime(150, now + 0.07);
+    gain.gain.setValueAtTime(0.3, now);
+    gain.gain.linearRampToValueAtTime(0.01, now + 0.07);
+    osc.connect(gain); gain.connect(audioCtx.destination);
+    osc.start(now); osc.stop(now + 0.07);
+  } else if (type === "kaa") {
+    const osc1 = audioCtx.createOscillator();
+    const osc2 = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc1.type = "sawtooth"; osc2.type = "square";
+    osc1.frequency.setValueAtTime(800, now);
+    osc1.frequency.exponentialRampToValueAtTime(350, now + 0.22);
+    osc2.frequency.setValueAtTime(805, now);
+    osc2.frequency.exponentialRampToValueAtTime(355, now + 0.22);
+    gain.gain.setValueAtTime(0.35, now);
+    gain.gain.linearRampToValueAtTime(0.01, now + 0.22);
+    osc1.connect(gain); osc2.connect(gain);
+    gain.connect(audioCtx.destination);
+    osc1.start(now); osc2.start(now);
+    osc1.stop(now + 0.22); osc2.stop(now + 0.22);
+  } else if (type === "perfect") {
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = "triangle";
+    osc.frequency.setValueAtTime(880, now);
+    osc.frequency.setValueAtTime(1760, now + 0.08);
+    gain.gain.setValueAtTime(0.2, now);
+    gain.gain.linearRampToValueAtTime(0.01, now + 0.25);
+    osc.connect(gain); gain.connect(audioCtx.destination);
+    osc.start(now); osc.stop(now + 0.25);
+  } else if (type === "miss") {
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = "sawtooth";
+    osc.frequency.setValueAtTime(140, now);
+    osc.frequency.linearRampToValueAtTime(70, now + 0.15);
+    gain.gain.setValueAtTime(0.2, now);
+    gain.gain.linearRampToValueAtTime(0.01, now + 0.15);
+    osc.connect(gain); gain.connect(audioCtx.destination);
+    osc.start(now); osc.stop(now + 0.15);
+  } else if (type === "levelup") {
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(523, now);
+    osc.frequency.setValueAtTime(659, now + 0.08);
+    osc.frequency.setValueAtTime(783, now + 0.16);
+    osc.frequency.setValueAtTime(1046, now + 0.24);
+    gain.gain.setValueAtTime(0.25, now);
+    gain.gain.linearRampToValueAtTime(0.01, now + 0.4);
+    osc.connect(gain); gain.connect(audioCtx.destination);
+    osc.start(now); osc.stop(now + 0.4);
+  }
+}
+
+function rect(x,y,w,h,c){ctx.fillStyle=c;ctx.fillRect(Math.round(x),Math.round(y),w,h);}
+function circle(x,y,r,c,stroke=null,sw=1){
+  ctx.beginPath(); ctx.arc(x,y,r,0,Math.PI*2);
+  if(c){ctx.fillStyle=c; ctx.fill();}
+  if(stroke){ctx.strokeStyle=stroke; ctx.lineWidth=sw; ctx.stroke();}
+}
+function text(s,x,y,size,c,align="center",font="bold"){
+  ctx.font = `${font} ${size}px 'Courier New', sans-serif`;
+  ctx.textAlign = align;
+  ctx.fillStyle = c;
+  ctx.fillText(s,x,y);
+}
+
+for(let i=0; i<30; i++){
+  bgConfetti.push({
+    x: Math.random()*960,
+    y: Math.random()*400,
+    r: Math.random()*3+2,
+    color: ["#ff7675", "#fdcb6e", "#74b9ff", "#55efc4", "#a29bfe"][Math.floor(Math.random()*5)],
+    vy: Math.random()*1 + 0.5,
+    vx: (Math.random()-0.5)*0.8
+  });
+}
+
+function drawBackground(){
+  rect(0,0,960,200,"#111e38");
+  rect(0,180,960,100,"#0b182e");
+
+  const cx = 480, cy = 20;
+  rect(cx-60, cy+60, 120, 70, "#192840");
+  rect(cx-40, cy+30, 80, 30, "#223554");
+  rect(cx-45, cy+10, 90, 20, "#192840");
+  rect(cx-15, cy-5,  30, 15, "#eef5fc");
+
+  function drawFlag(x, label){
+    rect(x, 100, 6, 200, "#d1d8e0");
+    rect(x>480?x-40:x+6, 110, 40, 120, "#ea2027");
+    rect(x>480?x-36:x+10, 115, 32, 110, "#ffffff");
+    text(label[0], x>480?x-20:x+26, 145, 18, "#1e272e");
+    text(label[1], x>480?x-20:x+26, 175, 18, "#1e272e");
+    text(label[2], x>480?x-20:x+26, 205, 18, "#1e272e");
+  }
+  drawFlag(60, "加勢鳥");
+  drawFlag(900, "初祝い");
+
+  const time = performance.now()/200;
+  for(let i=0; i<11; i++){
+    const lx = 80 + i * 80;
+    const ly = 25 + Math.sin(time + i)*3;
+    ctx.strokeStyle="#4b6584"; ctx.lineWidth=2;
+    ctx.beginPath(); ctx.moveTo(lx, 0); ctx.lineTo(lx, ly); ctx.stroke();
+    circle(lx, ly+12, 12, (i%2==0)?"#e84118":"#fbc531");
+    rect(lx-8, ly, 16, 4, "#2f3640");
+    rect(lx-8, ly+20, 16, 4, "#2f3640");
+    text("祭", lx, ly+16, 10, "#ffffff");
+  }
+
+  for(let i=0; i<5; i++){
+    const vx = 200 + i*140 + Math.sin(time + i)*10;
+    circle(vx, 250 - (time*10 + i*30)%60, 15 + i*3, "rgba(255,255,255,0.08)");
+  }
+
+  rect(0, 270, 960, 160, "#4b5563");
+  for(let i=0; i<960; i+=50){
+    rect(i, 270, 2, 160, "#374151");
+  }
+  for(let j=270; j<430; j+=25){
+    rect(0, j, 960, 2, "#374151");
+  }
+
+  for(let i=0; i<16; i++){
+    const px = 20 + i*60;
+    const py = 410 + Math.sin(time*2 + i)*4;
+    circle(px, py, 14, "#1f2937");
+    rect(px-12, py+10, 24, 30, "#111827");
+    if(i%3==0){
+      rect(px-4, py-20, 8, 12, "#1f2937");
+    }
+  }
+
+  bgConfetti.forEach(c => {
+    c.y += c.vy; c.x += c.vx;
+    if(c.y > 420) c.y = 0;
+    circle(c.x, c.y, c.r, c.color);
+  });
+}
+
+function drawKasedori(){
+  const bob = Math.sin(performance.now()/120)*4 - kasedoriJump;
+  const x =
